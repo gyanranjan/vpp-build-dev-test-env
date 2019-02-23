@@ -1,0 +1,9 @@
+docker run \
+        --privileged \
+       -u $(id -u ${USER}):$(id -g ${USER})  \
+       -v /home/${USER}:/home/${USER}  \
+       -v /var/run/docker.sock:/var/run/docker.sock \
+       --name builder \
+       -it granjan/vpp-build-env:first \
+       /bin/bash 
+
