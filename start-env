@@ -1,9 +1,110 @@
-docker run \
-        --privileged \
-       -u $(id -u ${USER}):$(id -g ${USER})  \
-       -v /home/${USER}:/home/${USER}  \
-       -v /var/run/docker.sock:/var/run/docker.sock \
-       --name builder \
-       -it granjan/vpp-build-env:first \
-       /bin/bash 
+#!/bin/bash
 
+if [ "$UID" -ne 0 ]
+then
+    CALLER_USER=`whoami`  
+    uid=$(id -u ${CALLER_USER})
+    gid=$(id -g ${CALLER_USER})
+    sudo gid=$gid uid=$uid VPP_WS_DIR=$VPP_WS_DIR  CALLER_USER=${CALLER_USER} "$0" "$@"
+    exit
+else
+    if [ -z "$CALLER_USER" ]
+    then 
+        echo "****** please do not use root account"
+        exit
+    fi
+fi
+
+#The test setup will be as below
+#
+#+-----------+               ------------+                   ------------+
+#|           |    sity12      |           |       sity23     |           |
+#|  sity-1   |----------------+ sity-2    +------------------+   sity-n  |
+#|           |                |           |                  |           |
+#|+---+------+                |+---+------+                  |+----+-----+
+#     |                            |                               |
+#    b|         bsity2             |                               |
+#    s|   +------------------------+                               |
+#    i|   |                                                        |
+#    t|   |           bsity3                                       |
+#    y|   | +------------------------------------------------------+
+#    1|   | |
+#-----+---+-++
+#|           |
+#| builder   |
+#|           |
+#|+----------+
+
+#create veth pairs for inter-container 
+#and one for builder that may act as the host
+#container_count=0 
+#while [ $container_count -le $number_of_containers ]
+#do
+#	ip link add name veth_$container_to_container_prefix  type veth peer name $container_to_container_prefix
+#	ip link add name veth_$container_to_builder_prefix  type veth peer name $container_to_builder_prefix
+#done
+
+echo $VPP_WS_DIR 
+echo  $uid $gid  ${CALLER_USER}
+
+#TODO
+INSTALLATION_MODE=1
+#copy ssh-id and misc
+if [ "$(readlink -f $0)" == "/usr/bin/vpp_build_builder_create" ]
+then
+    INSTALLATION_MODE=0
+fi
+
+#we mount the entire home directory
+MOUNT_DIR="/home/${CALLER_USER}/WS/"
+
+if [ "$INSTALLATION_MODE" -eq 1 ]
+then
+    echo "########## Creating WS directory $MOUNT_DIR  ##############"
+    mkdir -p $MOUNT_DIR
+    cp vpp_build_one_time_run  $MOUNT_DIR/   
+    cp vpp_build_build_all  $MOUNT_DIR/   
+    
+    chown $uid:$gid $MOUNT_DIR
+    chown $uid:$gid $MOUNT_DIR/vpp_build_one_time_run
+    chown $uid:$gid $MOUNT_DIR/vpp_build_build_all
+fi
+
+export MOUNT_DIR=$MOUNT_DIR
+export VPP_WS_DIR=$VPP_WS_DIR 
+export NAME=$CALLER_USER
+export uid=$uid
+export gid=$gid
+#-u $uid:$gid
+
+docker stop  builder
+docker rm    builder
+docker run \
+    --privileged \
+    -v $MOUNT_DIR:$MOUNT_DIR  \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    --name builder \
+    -td granjan/vpp-build-env:three  \
+    /bin/bash 
+       
+docker exec -it builder /bin/bash -c " \
+                  mkdir -p  /home/gyan;\
+                  touch /etc/group;\
+                  touch /etc/group; \
+                  groupadd $gid;  \
+                  useradd -rm -d /home/$NAME -s /bin/bash -g $gid  -G sudo  -u $uid $NAME;\
+                  chown $uid:$gid /home/$NAME; \
+                  echo $NAME:U6aMy0wojraho |  chpasswd -e "
+
+
+if [ "$INSTALLATION_MODE" -eq 0 ]
+then
+    exit
+fi
+
+cp "$(readlink -f $0)" /usr/bin/vpp_build_builder_create
+echo "docker exec -u \${USER} -it builder "/bin/bash" "  > /usr/bin/vpp_build_builder_connect
+echo "docker stop builder"  > /usr/bin/vpp_build_builder_stop
+echo "docker rm builder"  > /usr/bin/vpp_build_builder_rm  
+echo "docker rm builder"  > /usr/bin/vpp_build_builder_rm   
+chmod 777 /usr/bin/vpp_build_builder_*
