@@ -3,7 +3,6 @@
 
 
 WS_DIR="/home/`whoami`/WS"
-
 git clone https://gerrit.fd.io/r/vpp
 cd vpp
 git checkout tags/v18.10-rc2 -b v18.10-rc2
@@ -19,30 +18,32 @@ git clone  https://gerrit.fd.io/r/hc2vpp
 cd hc2vpp
 git checkout tags/v1.18.10-RC1 -b v1.18.10-RC1 
 
+
 cd $WS_DIR
 cd vpp
 make install-dep
 make install-ext-deps build pkg-deb
 
+cd $WS_DIR
+cd vpp
+echo "jvpp-ioamexport
+    jvpp-core
+    jvpp-gtpu
+    jvpp-ioampot
+    jvpp-nat
+    jvpp-pppoe
+    jvpp-registry
+    jvpp-core
+    jvpp-ioamtrace
+    jvpp-nsh
+    jvpp-ioamexport
+    jvpp-benchmark
+    jvpp-acl" | xargs -I {} mvn install:install-file -Dfile=$WS_DIR/vpp/build-root/build-vpp-native/japi/java/{}-18.10.jar -DgroupId=io.fd.vpp -DartifactId={} -Dversion=18.10-SNAPSHOT -Dpackaging=jar 
 
-
-echo "jvpp-ioamexport \
-    jvpp-core \
-    jvpp-gtpu \
-    jvpp-ioamexport \
-    jvpp-ioampot \
-    jvpp-ioamtrace \
-    jvpp-nat jvpp-pppoe \
-    jvpp-registry \
-    jvpp-core jvpp-ioamtrace \
-    jvpp-nsh jvpp-registry \
-    jvpp-benchmark jvpp-ioamexport \
-    jvpp-ioampot jvpp-benchmark jvpp-acl" | xargs -I {} mvn install:install-file -Dfile=$WS_DIR/vpp/build-root/build-vpp-native/japi/java/{}-18.10.jar -DgroupId=io.fd.vpp -DartifactId={} -Dversion=18.10-SNAPSHOT -Dpackaging=jar | grep -B3 "FAILURE"
-
-
+#vpp/build-root/build-vpp-native/japi/java/jvpp-ioamexport-18.10.jar
+exit
 cd $WS_DIR/honeycomb/
 mvn install
-
 
 cd $WS_DIR/hc2vpp/
 mvn install
