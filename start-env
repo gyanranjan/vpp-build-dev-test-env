@@ -70,6 +70,9 @@ then
     chown $uid:$gid $MOUNT_DIR/vpp_build_build_all
 fi
 
+
+
+
 export MOUNT_DIR=$MOUNT_DIR
 export VPP_WS_DIR=$VPP_WS_DIR 
 export NAME=$CALLER_USER
@@ -95,6 +98,13 @@ docker exec -it builder /bin/bash -c " \
                   useradd -rm -d /home/$NAME -s /bin/bash -g $gid  -G sudo  -u $uid $NAME;\
                   chown $uid:$gid /home/$NAME; \
                   echo $NAME:U6aMy0wojraho |  chpasswd -e "
+
+#expose the netns for others
+pid=`docker inspect -f '{{.State.Pid}}' builder`
+echo pid is $pid 
+mkdir -p /var/run/netns/
+rm /var/run/netns/builder
+ln -s "/proc/$pid/ns/net" /var/run/netns/builder
 
 
 if [ "$INSTALLATION_MODE" -eq 0 ]

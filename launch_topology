@@ -1,0 +1,182 @@
+#!/bin/bash
+
+if [ "$UID" -ne 0 ]
+then
+    CALLER_USER=`whoami`  
+    uid=$(id -u ${CALLER_USER})
+    gid=$(id -g ${CALLER_USER})
+    sudo gid=$gid uid=$uid VPP_WS_DIR=$VPP_WS_DIR  CALLER_USER=${CALLER_USER} "$0" "$@"
+    exit
+else
+    if [ -z "$CALLER_USER" ]
+    then 
+        echo "****** please do not use root account"
+        exit
+    fi
+fi
+
+#The test setup will be as below
+#
+#+-----------+               ------------+                   ------------+
+#|           |    sity12      |           |       sity23     |           |
+#|  sity-1   |----------------+ sity-2    +------------------+   sity-n  |
+#|           |                |           |                  |           |
+#|+---+------+                |+---+------+                  |+----+-----+
+#     |                            |                               |
+#    b|         bsity2             |                               |
+#    s|   +------------------------+                               |
+#    i|   |                                                        |
+#    t|   |           bsity3                                       |
+#    y|   | +------------------------------------------------------+
+#    1|   | |
+#-----+---+-++
+#|           |
+#| builder   |
+#|           |
+#|+----------+
+
+#create veth pairs for inter-container 
+#and one for builder that may act as the host
+#container_count=0 
+#while [ $container_count -le $number_of_containers ]
+#do
+#	ip link add name veth_$container_to_container_prefix  type veth peer name $container_to_container_prefix
+#	ip link add name veth_$container_to_builder_prefix  type veth peer name $container_to_builder_prefix
+#done
+
+echo $VPP_WS_DIR 
+echo  $uid $gid  ${CALLER_USER}
+
+#TODO
+INSTALLATION_MODE=1
+#copy ssh-id and misc
+if [ "$(readlink -f $0)" == "/usr/bin/vpp_test_topo_create" ]
+then
+    INSTALLATION_MODE=0
+fi
+
+#we mount the entire home directory
+MOUNT_DIR="/home/${CALLER_USER}/WS/"
+
+#test if vpp is already built ?
+
+export MOUNT_DIR=$MOUNT_DIR
+export VPP_WS_DIR=$VPP_WS_DIR 
+export NAME=$CALLER_USER
+export uid=$uid
+export gid=$gid
+host_name="builder"
+test_container_prefix="sity"
+max_container=2
+
+expose_container () {
+	if [ "$1" == "" ]; then
+          exit 1
+    fi
+        mkdir -p /var/run/netns
+        pid=`docker inspect -f '{{.State.Pid}}' $1`
+        rm /var/run/netns/$1
+        ln -s /proc/$pid/ns/net /var/run/netns/$1
+        echo "netns of ${1} exposed as /var/run/netns/${1}"
+   return 0
+}
+
+remove_container () {
+	#Cleanup all containers on the host (dead or alive).
+	if [ -z "$1" ]; then 
+		echo "Please supply container name"
+        return 1
+	else
+		docker stop $1
+		docker rm $1
+        return 0
+	fi
+}
+
+create_container() {
+	if [ -z "$1" ]; then 
+		echo "Please supply container name"
+    fi
+	export container_name=$1
+	docker run \
+    	--privileged \
+    	-v $MOUNT_DIR:$MOUNT_DIR  \
+    	--name $container_name \
+        --network none \
+    	-td granjan/vpp-build-env:mini_v1.0  \
+    	/bin/bash 
+
+    echo $?
+   	#fix some user name
+	docker exec -it $container_name /bin/bash -c " \
+                  mkdir -p  /home/$NAME;\
+                  touch /etc/passwd;\
+                  touch /etc/group; \
+                  groupadd $gid;  \
+                  useradd -rm -d /home/$NAME -s /bin/bash -g $gid  -G sudo  -u $uid $NAME;\
+                  chown $uid:$gid /home/$NAME; \
+                  echo $NAME:U6aMy0wojraho |  chpasswd -e ;\
+                  dpkg -i $MOUNT_DIR/vpp/build-root/*.deb ;
+                  echo \"dpdk {
+                            no-pci
+                    }\" >> /etc/vpp/startup.conf "
+}
+
+create_veth_and_attach_to_netns()
+{
+    echo  $1 $2 $3 $4 
+    ip link add name $2 type veth peer name $4
+    ip link set dev $2  up
+    ip link set $2 up netns $1
+    ip link set $4  up netns $3
+    return 0
+}
+
+delete_veth()
+{
+    echo  $1 $2 $3 $4
+    ip link delete dev $2  > /dev/null 2>&1
+    ip link delete dev $4444  > /dev/null 2>&1
+    return 0
+}
+
+
+#configure the topology
+container_index=0
+while [ "$container_index" -lt "$max_container" ]
+    do
+        name="$test_container_prefix$container_index"
+        remove_container $name
+        create_container $name
+        expose_container $name
+        
+        echo deleteing "builder"$name 
+        delete_veth "builder"$name
+        echo creating
+       create_veth_and_attach_to_netns $name "builder"$name  "builder" $name"builder"
+
+        if [ $container_index -ne 0 ]
+            then
+            name_old=$test_container_prefix$((container_index-1))
+            echo deleteing "builder"$name 
+            delete_veth  $name$name_old
+            echo creating
+            echo "create_veth_and_attach_to_netns $name  $name$name_old  $name_old $name_old$name"  
+            create_veth_and_attach_to_netns $name  $name$name_old  $name_old $name_old$name  
+        fi
+        container_index=$((container_index+1))
+    done
+
+
+if [ "$INSTALLATION_MODE" -eq 0 ]
+then
+    exit
+fi
+
+cp "$(readlink -f $0)" /usr/bin/vpp_test_topo_create
+echo "docker exec -u \${USER} -it $test_container_prefix\$1 "/bin/bash" "  > /usr/bin/vpp_test_connect
+echo "docker stop $test_container_prefix\$1"  > /usr/bin/vpp_test_stop
+echo "docker rm $test_container_prefix\$1"  > /usr/bin/vpp_test_stop
+chmod 777 /usr/bin/vpp_test_*
+
+
