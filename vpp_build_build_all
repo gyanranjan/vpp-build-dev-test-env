@@ -40,8 +40,6 @@ echo "jvpp-ioamexport
     jvpp-benchmark
     jvpp-acl" | xargs -I {} mvn install:install-file -Dfile=$WS_DIR/vpp/build-root/build-vpp-native/japi/java/{}-18.10.jar -DgroupId=io.fd.vpp -DartifactId={} -Dversion=18.10-SNAPSHOT -Dpackaging=jar 
 
-#vpp/build-root/build-vpp-native/japi/java/jvpp-ioamexport-18.10.jar
-exit
 cd $WS_DIR/honeycomb/
 mvn install
 
