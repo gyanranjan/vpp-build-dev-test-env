@@ -35,10 +35,7 @@ VPP_WS_KITCHEN="KITCHEN"
 
 if [ "$BASE_DIR" == "$INSTALLATION_PATH" ]
 then
-    echo
-    echo "  Installation not required as we are already installed"
     INSTALLATION_MODE=0
-    exit
 else
     echo 
     echo "  Files will get installed in $INSTALLATION_PATH"
@@ -126,9 +123,8 @@ docker exec -it builder /bin/bash -c " \
                   echo $NAME:U6aMy0wojraho |  chpasswd -e ;\
                   echo \"$NAME ALL=(ALL) NOPASSWD:ALL\" >> /etc/sudoers "
 
-echo "  nens exopsed ...."
+echo "  netns exopsed ...."
 pid=`docker inspect -f '{{.State.Pid}}' builder`
-echo pid is $pid 
 mkdir -p /var/run/netns/
 rm -f /var/run/netns/builder
 ln -s "/proc/$pid/ns/net" /var/run/netns/builder
