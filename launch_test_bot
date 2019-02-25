@@ -75,7 +75,7 @@ expose_container () {
     fi
         mkdir -p /var/run/netns
         pid=`docker inspect -f '{{.State.Pid}}' $1`
-        rm /var/run/netns/$1
+        rm -rf /var/run/netns/$1
         ln -s /proc/$pid/ns/net /var/run/netns/$1
         echo "netns of ${1} exposed as /var/run/netns/${1}"
    return 0
@@ -113,10 +113,12 @@ create_container() {
                   touch /etc/passwd;\
                   touch /etc/group; \
                   groupadd $gid;  \
+                  hostname  $container_name;  \
                   useradd -rm -d /home/$NAME -s /bin/bash -g $gid  -G sudo  -u $uid $NAME;\
                   chown $uid:$gid /home/$NAME; \
                   echo $NAME:U6aMy0wojraho |  chpasswd -e ;\
                   dpkg -i $MOUNT_DIR/vpp/build-root/*.deb ;
+                  echo $NAME ALL=(ALL) NOPASSWD:ALL >> /etc/sudoers "
                   echo \"dpdk {
                             no-pci
                     }\" >> /etc/vpp/startup.conf "
@@ -174,7 +176,7 @@ then
 fi
 
 cp "$(readlink -f $0)" /usr/bin/vpp_test_topo_create
-echo "docker exec -u \${USER} -it $test_container_prefix\$1 "/bin/bash" "  > /usr/bin/vpp_test_connect
+echo "docker exec  -it $test_container_prefix\$1 "/bin/bash" "  > /usr/bin/vpp_test_connect
 echo "docker stop $test_container_prefix\$1"  > /usr/bin/vpp_test_stop
 echo "docker rm $test_container_prefix\$1"  > /usr/bin/vpp_test_stop
 chmod 777 /usr/bin/vpp_test_*
