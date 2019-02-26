@@ -2,5 +2,7 @@ mkdir -p ~/.m2/
 touch ~/.m2/settings.xml
 cp  ~/.m2/settings.xml ~/.m2/settings.xml.orig ; wget -q -O - https://raw.githubusercontent.com/opendaylight/odlparent/master/settings.xml > ~/.m2/settings.xml
 
+sudo rm -rf /var/lib/apt/lists/*
+
 sudo apt-get update -y
 

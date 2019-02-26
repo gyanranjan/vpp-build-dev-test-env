@@ -18,6 +18,7 @@ fi
 #Check if docker can be started wthout sudo
 echo "*** Please ensure user name is added to docker group"
 echo "*** you should be able to start stop docker without sudo"
+#https://medium.com/devgorilla/how-to-install-docker-on-ubuntu-18-04-495216a16092
 
 #TODO
 DOCKER_IMAGE="granjan/vpp-build-env:three"
@@ -75,7 +76,7 @@ else
     #let us fix the username used for docker
     BUILDER_CONNECT="vpp_build_builder_connect"
     echo "  ---Use $BUILDER_CONNECT to connect to your build environment"
-    echo "docker exec -u $CALLER_NAME -it builder "/bin/bash" "  > $INSTALLATION_PATH/$BUILDER_CONNECT
+    echo "docker exec -u $CALLER_USER -it builder "/bin/bash" "  > $INSTALLATION_PATH/$BUILDER_CONNECT
     
     BUILDER_STOP="vpp_build_builder_stop"
     echo "  ---Use $BUILDER_STOP to stop vpp build env"

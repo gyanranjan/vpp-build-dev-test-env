@@ -2,7 +2,9 @@
 
 
 
-WS_DIR="/home/`whoami`/WS"
+WS_DIR="/home/`whoami`/VPP-WS"
+
+cd $WS_DIR
 git clone https://gerrit.fd.io/r/vpp
 cd vpp
 git checkout tags/v18.10-rc2 -b v18.10-rc2
