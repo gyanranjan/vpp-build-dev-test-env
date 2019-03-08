@@ -5,7 +5,7 @@ then
     CALLER_USER=`whoami`  
     uid=$(id -u ${CALLER_USER})
     gid=$(id -g ${CALLER_USER})
-    sudo gid=$gid uid=$uid CALLER_USER=${CALLER_USER} "$0" "$@"
+    sudo gid=$gid uid=$uid CALLER_USER=${CALLER_USER}  WORKSPACE=${WORKSPACE} "$0" "$@"
     exit
 else
     if [ -z "$CALLER_USER" ]
@@ -20,113 +20,181 @@ echo "*** Please ensure user name is added to docker group"
 echo "*** you should be able to start stop docker without sudo"
 #https://medium.com/devgorilla/how-to-install-docker-on-ubuntu-18-04-495216a16092
 
-#TODO
-DOCKER_IMAGE="granjan/vpp-build-env:three"
-
-INSTALLATION_MODE=1
-INSTALLATION_PATH="/usr/bin"
-BUILDER_CREATE="vpp_build_builder_create"
-#This is just temporary
-BUILD_ALL="vpp_build_build_all"
-SCRIPT=$(readlink -f $0)
-BASE_DIR=`dirname $SCRIPT`
-
-VPP_WS="/home/${CALLER_USER}/VPP-WS/"
-VPP_WS_KITCHEN="KITCHEN"
-
-if [ "$BASE_DIR" == "$INSTALLATION_PATH" ]
+#TOD0
+INSTALLATION_PATH="/usr/local/bin/vpp_builder"
+#copy ssh-id and misc
+if [ ! "$(readlink -f $0)" == "$INSTALLATION_PATH" ]
 then
-    INSTALLATION_MODE=0
-else
-    echo 
-    echo "  Files will get installed in $INSTALLATION_PATH"
-    INSTALLATION_MODE=1
-
-    echo "  VPP Build env installation starting ....."
-    echo  
-    echo "  Creating VPP workspace directory @ $VPP_WS"
-    mkdir -p $VPP_WS
-
-    KITCHEN="$VPP_WS/$VPP_WS_KITCHEN"
-    echo
-    echo "  Creating VPP workspace kitchen sink @ $KITCHEN"
-    echo "      This directory will have small scripts"
-    echo "  like toplogy etc dictating topology, vpp configs etc"
-    mkdir -p $KITCHEN
-    chown $uid:$gid $KITCHEN
-    
-    echo   
-    echo "  Copying example build scipts @$KITCHEN "
-    echo "  ---Run vpp_build_one_time_run once for setting maven for honeycomb build"
-    cp  $BASE_DIR/vpp_build_one_time_run $KITCHEN
-    
-    echo "  ---See vpp_build_build_all on how build is done"
-    cp  $BASE_DIR/vpp_build_build_all $KITCHEN
-
-    chown $uid:$gid $VPP_WS
-    chown  $uid:$gid $KITCHEN
-    chown  $uid:$gid $KITCHEN/vpp_build_one_time_run
-    chown  $uid:$gid $KITCHEN/vpp_build_build_all
-    
-    BUILDER_FILE=$INSTALLATION_PATH/$BUILDER_CREATE
-    cp -f $(readlink -f $0) $BUILDER_FILE
-    echo "  ----Please use $BUILDER_FILE for creating build"
-    echo "      deploy env after this installation deploy"
- 
-    #let us fix the username used for docker
-    BUILDER_CONNECT="vpp_build_builder_connect"
-    echo "  ---Use $BUILDER_CONNECT to connect to your build environment"
-    echo "docker exec -u $CALLER_USER -it builder "/bin/bash" "  > $INSTALLATION_PATH/$BUILDER_CONNECT
-    
-    BUILDER_STOP="vpp_build_builder_stop"
-    echo "  ---Use $BUILDER_STOP to stop vpp build env"
-    echo "docker stop builder"  > $INSTALLATION_PATH/$BUILDER_STOP
-
-    BUILDER_RM="vpp_build_builder_rm"
-    echo "  ---Use $BUILDER_STOP to remove vpp build env"
-    echo "docker rm builder"  > $INSTALLATION_PATH/$BUILDER_RM
-
-    chmod +x $INSTALLATION_PATH/vpp_build_builder_*
-    chown -R $uid:$gid $INSTALLATION_PATH/vpp_build_builder_*
-
-    echo "  Pulling Docker image $DOCKER_IMAGE"
-    docker pull $DOCKER_IMAGE
+    echo "  Installing in $(readlink -f $0)   $INSTALLATION_PATH"
+    cp "$(readlink -f $0)"  $INSTALLATION_PATH
     exit
 fi
 
-export VPP_WS=$VPP_WS
+if [ -z $WORKSPACE ];
+then
+	echo "  Please export WORKSPACE directory which has build env as well"
+	exit
+else
+	MOUNT_DIR=$WORKSPACE
+fi
+
+create_builder=0
+start_builder=0
+pause_builder=0
+delete_builder=0
+connect_builder=0
+
+# read the options
+OPTION=`getopt -o cspdhn --long create,start,pause,delete,help,connect -- "$@"`
+eval set -- "$OPTION"
+#Following are the options 
+while true; do
+    case "$1" in
+        -c| --create ) 
+            create_builder=1
+            shift;;
+        -i| --start )
+            start_builder=1
+            shift;;
+        -n|--connect)
+            connect_builder=1
+            shift 1;;
+        -s|--pause) 
+            pause_builder=1 
+            shift;;
+        -d|--delete)
+            delete_builder=1
+            shift;;
+        -h|--help) 
+            echo "Usage"
+            echo "      $0  --create          :Create the builder "   
+            echo "      $0  --start           :Starts the builder "
+            echo "      $0  --connect         :Connect to builder"
+            echo "      $0  --delete          :Delete  the builder "
+            echo "      $0  --pause           :Stop the builder  "
+            exit ;;
+        --) shift ; break ;;
+        *) echo "Internal error!" ; exit 1 ;;
+    esac
+done
+
+remove_container() {
+	#Cleanup all containers on the host (dead or alive).
+	if [ -z "$1" ]; then 
+		echo "Please supply container name"
+        return 1
+	else
+		docker stop $1 > /dev/null 2>&1
+		docker rm $1   > /dev/null 2>&1
+        return 0
+	fi
+}
+
+create_container() {
+        if [ -z "$1" ]; then 
+                echo "Please supply container name"
+        fi
+        export container_name=$1
+        
+        echo "  Removing any build any older build environment"
+        docker stop  $container_name
+        docker rm    $container_name
+        docker run                                          \
+                --privileged                                \
+                -v $MOUNT_DIR:$MOUNT_DIR                    \
+                --name $container_name                      \
+                -u ${NAME}                                  \
+                -v $VPP_DIR:/vpp                            \
+                -v /var/run/docker.sock:/var/run/docker.sock\
+                -td $DOCKER_IMAGE_NAME                      \
+                /bin/bash 
+            
+        echo "  fixing the image ...."
+        docker exec -it $container_name /bin/bash -c "  \
+                        mkdir -p  /home/gyan;           \
+                        touch /etc/passwd;              \
+                        touch /etc/group;               \
+                        groupadd $gid;                  \
+                        hostname $container_name;       \
+                        useradd -rm -d /home/$NAME -s   \
+                        /bin/bash -g $gid  -G sudo  -u  \
+                        $uid $NAME;                     \
+                        chown $uid:$gid /home/$NAME;    \
+                        echo $NAME:U6aMy0wojraho |  chpasswd -e ;\
+                        echo \"$NAME ALL=(ALL) NOPASSWD:ALL\" >> /etc/sudoers "
+}
+        
+start_container() {
+    if [ -z "$1" ]; then 
+        echo "Please supply container name"
+    fi
+    docker run                                          \
+            -v $MOUNT_DIR:$MOUNT_DIR                    \
+            -u ${NAME}                                  \
+            --name $container_name                      \
+            -v $VPP_DIR:/vpp                            \
+            -v /var/run/docker.sock:/var/run/docker.sock\
+            -td $DOCKER_IMAGE_NAME                      \
+            /bin/bash 
+}
+
+
+connect_container() {
+    if [ -z "$1" ]; then 
+                echo "Please supply container name"
+    fi
+    export container_name=$1
+    docker exec -u $NAME -it $container_name  "/bin/bash"
+}
+
+
+stop_container() {
+    if [ -z "$1" ]; then 
+                echo "Please supply container name"
+    fi
+    export container_name=$1
+    docker stop  --name $container_name 
+}
+
+
+
+VPP_DIR=$WORKSPACE/vpp/
+DOCKER_IMAGE="granjan/vpp-build-env:four"
+mkdir -p  $WORKSPACE
+VPP_WS="/home/${CALLER_USER}/VPP-WS/"
+VPP_WS_KITCHEN="KITCHEN"
+export KITCHEN="$WORKSPACE/$VPP_WS_KITCHEN"
+export MOUNT_DIR=$MOUNT_DIR
+export VPP_DIR=$VPP_DIR 
 export NAME=$CALLER_USER
 export uid=$uid
 export gid=$gid
+export DOCKER_IMAGE_NAME=granjan/vpp-build-env:four
+mkdir -p $KITCHEN
+chown $uid:$gid $KITCHEN
+#Copy important files to the kitchen 
+if [ $create_builder -eq 1 ]; then
+    remove_container "builder"
+    create_container "builder"
 
-echo 
-echo "  Removing any build any older build environment"
-docker stop  builder
-docker rm    builder
-docker run \
-    --privileged \
-    -v $VPP_WS:$VPP_WS  \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    --name builder \
-    -td $DOCKER_IMAGE   \
-    /bin/bash 
-      
+fi
 
-echo "  Removing fixing the image ...."
-docker exec -it builder /bin/bash -c " \
-                  mkdir -p  /home/gyan;\
-                  touch /etc/passwd;\
-                  touch /etc/group; \
-                  groupadd $gid;  \
-                  hostname builder;  \
-                  useradd -rm -d /home/$NAME -s /bin/bash -g $gid  -G sudo  -u $uid $NAME;\
-                  chown $uid:$gid /home/$NAME; \
-                  echo $NAME:U6aMy0wojraho |  chpasswd -e ;\
-                  echo \"$NAME ALL=(ALL) NOPASSWD:ALL\" >> /etc/sudoers "
+if [ $start_builder -eq 1 ]; then
+    start_container "builder"
+fi
 
-echo "  netns exopsed ...."
-pid=`docker inspect -f '{{.State.Pid}}' builder`
-mkdir -p /var/run/netns/
-rm -f /var/run/netns/builder
-ln -s "/proc/$pid/ns/net" /var/run/netns/builder
 
+if [ $pause_builder -eq 1 ]; then
+    stop_container "builder"
+fi
+
+
+if [ $delete_builder -eq 1 ]; then
+    remove_container "builder"
+fi
+
+if [ $connect_builder -eq 1 ]; then
+    connect_container  "builder"
+fi
+
+ 

@@ -5,12 +5,12 @@ then
     CALLER_USER=`whoami`  
     uid=$(id -u ${CALLER_USER})
     gid=$(id -g ${CALLER_USER})
-    sudo gid=$gid uid=$uid VPP_WS_DIR=$VPP_WS_DIR  CALLER_USER=${CALLER_USER} "$0" "$@"
+    sudo gid=$gid uid=$uid   CALLER_USER=${CALLER_USER} WORKSPACE=${WORKSPACE} "$0" "$@"
     exit
 else
     if [ -z "$CALLER_USER" ]
     then 
-        echo "****** please do not use root account"
+        echo "****** Please do not run as  root "
         exit
     fi
 fi
@@ -19,53 +19,100 @@ fi
 #
 #+-----------+               ------------+                   ------------+
 #|           |    sity12      |           |       sity23     |           |
-#|  sity-1   |----------------+ sity-2    +------------------+   sity-n  |
-#|           |                |           |                  |           |
-#|+---+------+                |+---+------+                  |+----+-----+
-#     |                            |                               |
-#    b|         bsity2             |                               |
-#    s|   +------------------------+                               |
-#    i|   |                                                        |
-#    t|   |           bsity3                                       |
-#    y|   | +------------------------------------------------------+
-#    1|   | |
-#-----+---+-++
-#|           |
-#| builder   |
-#|           |
-#|+----------+
+#|  sity-1   |----------------+ sity-2    +------------------+   sity-n  |----
+#|           |                |           |                  |           |   |
+#|+---+------+                |+---+------+                  |+----+-----+   |
+#     |                                                                      +
+#     -----------------------------------------------------------------------+
 
-#create veth pairs for inter-container 
-#and one for builder that may act as the host
-#container_count=0 
-#while [ $container_count -le $number_of_containers ]
-#do
-#	ip link add name veth_$container_to_container_prefix  type veth peer name $container_to_container_prefix
-#	ip link add name veth_$container_to_builder_prefix  type veth peer name $container_to_builder_prefix
-#done
 
-echo $VPP_WS_DIR 
-echo  $uid $gid  ${CALLER_USER}
-
-#TODO
+#TOD0
+INSTALLATION_PATH="/usr/local/bin/vpp_test_topo"
 INSTALLATION_MODE=1
 #copy ssh-id and misc
-if [ "$(readlink -f $0)" == "/usr/bin/vpp_test_topo_create" ]
+if [ ! "$(readlink -f $0)" == "$INSTALLATION_PATH" ]
 then
+    echo "  Installing in $(readlink -f $0)   $INSTALLATION_PATH"
+    cp "$(readlink -f $0)"  $INSTALLATION_PATH
     INSTALLATION_MODE=0
+    exit
 fi
 
-#we mount the entire home directory
-MOUNT_DIR="/home/${CALLER_USER}/WS/"
+if [ -z "$WORKSPACE" ];
+then
+	echo "  Please export WORKSPACE directory which has build env as well"
+	exit
+else
+	MOUNT_DIR=$WORKSPACE
+fi
 
-#test if vpp is already built ?
+
+VPP_DIR=$WORKSPACE/vpp/
+#check if vpp packages are available in the package director 
+if [ ! -d "$VPP_DIR" ]; then
+	echo "  Please ensure vpp is built and packages are available in $VPP_DIR"
+	  # Control will enter here if $DIRECTORY exists.
+	exit
+fi
+
+
+create_topology=0
+start_topology=0
+pause_topology=0
+delete_topology=0
+connect_topology=0
+index_to_connect=0
+
+# read the options
+OPTION=`getopt -o cspdhn: --long create,start,pause,delete,help,connect: -- "$@"`
+eval set -- "$OPTION"
+#Following are the options 
+while true; do
+    case "$1" in
+        -c| --create ) 
+            create_topology=1
+            shift;;
+        -i| --start )
+            start_topology=1
+            shift;;
+        -n|--connect)
+            connect_topology=1
+            index_to_connect=$2 
+            shift 2;;
+        -s|--pause) 
+            pause_topology=1 
+            shift;;
+        -d|--delete)
+            delete_topology=1
+            shift;;
+        -h|--help) 
+            echo "Usage"
+            echo "      $0  --create          :Create the topology "   
+            echo "      $0  --start           :Starts the topology "
+            echo "      $0  --connect <n>     :Connect to the topology "
+            echo "      $0  --delete          :Delete the topology "
+            echo "      $0  --pause           :Stop the topology  "
+            exit ;;
+        --) shift ; break ;;
+        *) echo "Internal error!" ; exit 1 ;;
+    esac
+done
+
+#echo $create_topology
+#echo $start_topology
+#echo $pause_topology
+#echo $delete_topology
+#echo $connect_topology
+#echo $index_to_connect 
+#
+#exit
 
 export MOUNT_DIR=$MOUNT_DIR
-export VPP_WS_DIR=$VPP_WS_DIR 
+export VPP_DIR=$VPP_DIR 
 export NAME=$CALLER_USER
 export uid=$uid
 export gid=$gid
-host_name="builder"
+export DOCKER_IMAGE_NAME=granjan/vpp-build-env:four
 test_container_prefix="sity"
 max_container=2
 
@@ -77,7 +124,7 @@ expose_container () {
         pid=`docker inspect -f '{{.State.Pid}}' $1`
         rm -rf /var/run/netns/$1
         ln -s /proc/$pid/ns/net /var/run/netns/$1
-        echo "netns of ${1} exposed as /var/run/netns/${1}"
+        echo "     netns of ${1} exposed as /var/run/netns/${1}"
    return 0
 }
 
@@ -87,28 +134,29 @@ remove_container () {
 		echo "Please supply container name"
         return 1
 	else
-		docker stop $1
-		docker rm $1
+		docker stop $1 > /dev/null 2>&1
+		docker rm $1   > /dev/null 2>&1
         return 0
 	fi
 }
 
 create_container() {
-	if [ -z "$1" ]; then 
-		echo "Please supply container name"
-    fi
-	export container_name=$1
-	docker run \
-    	--privileged \
-    	-v $MOUNT_DIR:$MOUNT_DIR  \
-    	--name $container_name \
-        --network none \
-    	-td granjan/vpp-build-env:mini_v1.0  \
-    	/bin/bash 
+        if [ -z "$1" ]; then 
+                echo "Please supply container name"
+        fi
+        export container_name=$1
+        docker run \
+                --privileged \
+                -v $MOUNT_DIR:$MOUNT_DIR  \
+                --name $container_name \
+                -v $VPP_DIR:/vpp  \
+                --network none \
+                -td $DOCKER_IMAGE_NAME  \
+                /bin/bash 
 
-    echo $?
-   	#fix some user name
-	docker exec -it $container_name /bin/bash -c " \
+        echo  fix stuffs in $container_name
+        #fix some user name
+        docker exec -it $container_name /bin/bash -c "\
                   mkdir -p  /home/$NAME;\
                   touch /etc/passwd;\
                   touch /etc/group; \
@@ -117,11 +165,44 @@ create_container() {
                   useradd -rm -d /home/$NAME -s /bin/bash -g $gid  -G sudo  -u $uid $NAME;\
                   chown $uid:$gid /home/$NAME; \
                   echo $NAME:U6aMy0wojraho |  chpasswd -e ;\
-                  dpkg -i $MOUNT_DIR/vpp/build-root/*.deb ;
-                  echo $NAME ALL=(ALL) NOPASSWD:ALL >> /etc/sudoers "
+                  dpkg -i /vpp/build-root/*.deb ;
+                  echo \"$NAME ALL=(ALL) NOPASSWD:ALL\" >> /etc/sudoers \
                   echo \"dpdk {
                             no-pci
                     }\" >> /etc/vpp/startup.conf "
+        }
+        
+start_container() {
+    if [ -z "$1" ]; then 
+                echo "Please supply container name"
+    fi
+    export container_name=$1
+    docker run \
+                --privileged \
+                -v $MOUNT_DIR:$MOUNT_DIR  \
+                --name $container_name \
+                -v $VPP_DIR:/vpp  \
+                --network none \
+                -td $DOCKER_IMAGE_NAME  \
+                /bin/bash 
+}
+
+
+connect_container() {
+    if [ -z "$1" ]; then 
+                echo "Please supply container name"
+    fi
+    export container_name=$1
+    docker exec -it $container_name  "/bin/bash"
+}
+
+
+stop_container() {
+    if [ -z "$1" ]; then 
+                echo "Please supply container name"
+    fi
+    export container_name=$1
+    docker stop  --name $container_name 
 }
 
 create_veth_and_attach_to_netns()
@@ -138,47 +219,72 @@ delete_veth()
 {
     echo  $1 $2 $3 $4
     ip link delete dev $2  > /dev/null 2>&1
-    ip link delete dev $4444  > /dev/null 2>&1
+    sleep 1
+    ip link delete dev $4  > /dev/null 2>&1
+    sleep 2
     return 0
 }
 
 
+if [ $connect_topology -eq 1 ];then
+    name="$test_container_prefix$index_to_connect"
+    connect_container   $name
+    exit
+fi
+
+
 #configure the topology
-container_index=0
-while [ "$container_index" -lt "$max_container" ]
+    container_index=0
+    echo "  Max number of containers to be created is $max_container"
+    while [ "$container_index" -lt "$max_container" ] 
     do
         name="$test_container_prefix$container_index"
-        remove_container $name
-        create_container $name
-        expose_container $name
         
-        echo deleteing "builder"$name 
-        delete_veth "builder"$name
-        echo creating
-       create_veth_and_attach_to_netns $name "builder"$name  "builder" $name"builder"
-
-        if [ $container_index -ne 0 ]
-            then
+        if [ $create_topology -eq 1 ] || [ $delete_topology -eq 1 ] ; then 
+            echo "  Deleting old container $name <if present>"
+            remove_container $name > /dev/null 2>&1
+        fi
+        
+        if [ $create_topology -eq 1 ]; then 
+            create_container $name > /dev/null 2>&1
+            echo "  Created new container $name"
+        fi
+        
+        if [ $create_topology -eq 1 ]; then
+            start_topology=1
+        elif  [ $start_topology -eq 1 ]; then  
+            start_container $name > /dev/null 2>&1
+            echo "  Started container $name"
+        fi
+        
+        if [ $start_topology -eq 1 ]; then   
+            expose_container $name /dev/null 2>&1
+        fi
+        
+       
+        #
+        if [ $container_index -ne 0 ]; then
             name_old=$test_container_prefix$((container_index-1))
-            echo deleteing "builder"$name 
-            delete_veth  $name$name_old
-            echo creating
-            echo "create_veth_and_attach_to_netns $name  $name$name_old  $name_old $name_old$name"  
-            create_veth_and_attach_to_netns $name  $name$name_old  $name_old $name_old$name  
+            echo "    Deleting old veth $name$name_old pair <if present>"
+            delete_veth $name  $name$name_old  $name_old $name_old$name > /dev/null 2>&1
+            if [ $start_topology -eq 1 ]; then
+                echo "  Creating veth pair  $name from  $name$name_old  and attaching"
+                create_veth_and_attach_to_netns $name  $name$name_old  $name_old $name_old$name > /dev/null 2>&1
+            fi
+        fi
+        
+        if [ $container_index -eq $((max_container-1)) ]; then
+            name_old=$name
+            name=$test_container_prefix$((1-1))
+            echo "    Deleting old veth $name$name_old pair <if present>"
+            delete_veth  $name  "A"$name$name_old  $name_old "A"$name_old$name > /dev/null 2>&1
+            if [ $start_topology -eq 1 ]; then
+                echo "  Creating veth pair  $name from  $name$name_old  and attaching"
+                create_veth_and_attach_to_netns $name  "A"$name$name_old  $name_old "A"$name_old$name > /dev/null 2>&1
+            fi
+            break;
         fi
         container_index=$((container_index+1))
     done
 
-
-if [ "$INSTALLATION_MODE" -eq 0 ]
-then
-    exit
-fi
-
-cp "$(readlink -f $0)" /usr/bin/vpp_test_topo_create
-echo "docker exec  -it $test_container_prefix\$1 "/bin/bash" "  > /usr/bin/vpp_test_connect
-echo "docker stop $test_container_prefix\$1"  > /usr/bin/vpp_test_stop
-echo "docker rm $test_container_prefix\$1"  > /usr/bin/vpp_test_stop
-chmod 777 /usr/bin/vpp_test_*
-
-
+    
